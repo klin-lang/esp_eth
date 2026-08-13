@@ -17,21 +17,70 @@
 
 #define KLIN_ETH_GOT_IP_BIT BIT0
 #define KLIN_ETH_LINK_BIT   BIT1
+#define KLIN_ETH_HOSTNAME_MAX 32
 
 static EventGroupHandle_t s_eth_event_group;
 static esp_eth_handle_t s_eth_handle;
 static esp_netif_t *s_eth_netif;
 static esp_eth_netif_glue_handle_t s_eth_glue;
 static uint32_t s_ip_u32;
+static uint32_t s_gw_u32;
+static uint32_t s_mask_u32;
 static int s_started;
 static int s_link_up;
+static int s_use_static;
+static uint32_t s_static_ip;
+static uint32_t s_static_gw;
+static uint32_t s_static_mask;
+static char s_hostname[KLIN_ETH_HOSTNAME_MAX];
 static spi_device_interface_config_t s_spi_devcfg;
+
+static void klin_eth_fmt_ipv4(char *buf, size_t n, uint32_t a)
+{
+    snprintf(buf, n, "%u.%u.%u.%u", (unsigned)(a & 0xffu),
+             (unsigned)((a >> 8) & 0xffu), (unsigned)((a >> 16) & 0xffu),
+             (unsigned)((a >> 24) & 0xffu));
+}
+
+static esp_err_t klin_eth_apply_static_ip(void)
+{
+    esp_err_t err;
+    esp_netif_ip_info_t ip_info;
+
+    if (s_eth_netif == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!s_use_static) {
+        return ESP_OK;
+    }
+
+    err = esp_netif_dhcpc_stop(s_eth_netif);
+    if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+        return err;
+    }
+
+    memset(&ip_info, 0, sizeof(ip_info));
+    ip_info.ip.addr = s_static_ip;
+    ip_info.gw.addr = s_static_gw;
+    ip_info.netmask.addr = s_static_mask;
+    return esp_netif_set_ip_info(s_eth_netif, &ip_info);
+}
+
+static esp_err_t klin_eth_apply_hostname(void)
+{
+    if (s_eth_netif == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_hostname[0] == '\0') {
+        return ESP_OK;
+    }
+    return esp_netif_set_hostname(s_eth_netif, s_hostname);
+}
 
 static void klin_eth_event_handler(void *arg, esp_event_base_t event_base,
                                    int32_t event_id, void *event_data)
 {
     (void)arg;
-    (void)event_data;
     if (event_base == ETH_EVENT) {
         if (event_id == ETHERNET_EVENT_CONNECTED) {
             s_link_up = 1;
@@ -43,8 +92,47 @@ static void klin_eth_event_handler(void *arg, esp_event_base_t event_base,
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_ETH_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         s_ip_u32 = (uint32_t)event->ip_info.ip.addr;
+        s_gw_u32 = (uint32_t)event->ip_info.gw.addr;
+        s_mask_u32 = (uint32_t)event->ip_info.netmask.addr;
         xEventGroupSetBits(s_eth_event_group, KLIN_ETH_GOT_IP_BIT);
     }
+}
+
+int klin_eth_set_static_ip(uint32_t ip, uint32_t gw, uint32_t netmask)
+{
+    if (ip == 0 && gw == 0 && netmask == 0) {
+        s_use_static = 0;
+        s_static_ip = 0;
+        s_static_gw = 0;
+        s_static_mask = 0;
+        return (int)ESP_OK;
+    }
+
+    s_use_static = 1;
+    s_static_ip = ip;
+    s_static_gw = gw;
+    s_static_mask = netmask;
+
+    if (s_started) {
+        return (int)klin_eth_apply_static_ip();
+    }
+    return (int)ESP_OK;
+}
+
+int klin_eth_set_hostname(const char *name)
+{
+    if (name == NULL || name[0] == '\0') {
+        s_hostname[0] = '\0';
+        return (int)ESP_OK;
+    }
+
+    strncpy(s_hostname, name, sizeof(s_hostname) - 1);
+    s_hostname[sizeof(s_hostname) - 1] = '\0';
+
+    if (s_started) {
+        return (int)klin_eth_apply_hostname();
+    }
+    return (int)ESP_OK;
 }
 
 int klin_eth_w5500_start(int spi_host, int mosi, int miso, int sclk, int cs,
@@ -154,6 +242,16 @@ int klin_eth_w5500_start(int spi_host, int mosi, int miso, int sclk, int cs,
         return (int)err;
     }
 
+    err = klin_eth_apply_hostname();
+    if (err != ESP_OK) {
+        return (int)err;
+    }
+
+    err = klin_eth_apply_static_ip();
+    if (err != ESP_OK) {
+        return (int)err;
+    }
+
     err = esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
                                      &klin_eth_event_handler, NULL);
     if (err != ESP_OK) {
@@ -166,6 +264,8 @@ int klin_eth_w5500_start(int spi_host, int mosi, int miso, int sclk, int cs,
     }
 
     s_ip_u32 = 0;
+    s_gw_u32 = 0;
+    s_mask_u32 = 0;
     s_link_up = 0;
     xEventGroupClearBits(s_eth_event_group,
                          KLIN_ETH_GOT_IP_BIT | KLIN_ETH_LINK_BIT);
@@ -235,12 +335,32 @@ uint32_t klin_eth_ip_u32(void)
     return s_ip_u32;
 }
 
+uint32_t klin_eth_gateway_u32(void)
+{
+    return s_gw_u32;
+}
+
+uint32_t klin_eth_netmask_u32(void)
+{
+    return s_mask_u32;
+}
+
 void klin_eth_log_ip(void)
 {
-    uint32_t a = s_ip_u32;
-    printf("klin_eth: ip %u.%u.%u.%u\n", (unsigned)(a & 0xffu),
-           (unsigned)((a >> 8) & 0xffu), (unsigned)((a >> 16) & 0xffu),
-           (unsigned)((a >> 24) & 0xffu));
+    char ip[16];
+    klin_eth_fmt_ipv4(ip, sizeof(ip), s_ip_u32);
+    printf("klin_eth: ip %s\n", ip);
+}
+
+void klin_eth_log_ip_info(void)
+{
+    char ip[16];
+    char gw[16];
+    char mask[16];
+    klin_eth_fmt_ipv4(ip, sizeof(ip), s_ip_u32);
+    klin_eth_fmt_ipv4(gw, sizeof(gw), s_gw_u32);
+    klin_eth_fmt_ipv4(mask, sizeof(mask), s_mask_u32);
+    printf("klin_eth: ip %s gw %s mask %s\n", ip, gw, mask);
 }
 
 void klin_eth_log_mac(void)
