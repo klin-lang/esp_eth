@@ -20,6 +20,11 @@ fn app_main_klin() {
   if e != eth.err_ok() {
     return
   }
+  eth.log_mac()
+  e = eth.wait_link(15000)
+  if e != eth.err_ok() {
+    return
+  }
   e = eth.wait_ip(30000)
   if e != eth.err_ok() {
     return
