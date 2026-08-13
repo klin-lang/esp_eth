@@ -6,6 +6,14 @@ fn main() {
   if e != eth.err_ok() {
     return
   }
+  eth.log_mac()
+  e = eth.wait_link(1000)
+  if e != eth.err_ok() {
+    return
+  }
+  if !eth.link_up() {
+    return
+  }
   e = eth.wait_ip(1000)
   if e != eth.err_ok() {
     return
