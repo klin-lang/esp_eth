@@ -2,6 +2,11 @@
 import "../../esp_eth" eth
 
 fn main() {
+  let _h = eth.set_hostname("klin-eth")
+  let ip = eth.ipv4(192, 168, 1, 50)
+  let gw = eth.ipv4(192, 168, 1, 1)
+  let mask = eth.ipv4(255, 255, 255, 0)
+  let _s = eth.set_static_ip(ip, gw, mask)
   let mut e = eth.w5500_start(eth.spi2_host(), 11, 13, 12, 14, 10, 9, 20, 10)
   if e != eth.err_ok() {
     return
@@ -18,10 +23,16 @@ fn main() {
   if e != eth.err_ok() {
     return
   }
-  let ip = eth.ip_u32()
-  if ip == 0 {
+  if eth.ip_u32() == 0 {
+    return
+  }
+  if eth.gateway_u32() == 0 {
+    return
+  }
+  if eth.netmask_u32() == 0 {
     return
   }
   eth.log_ip()
+  eth.log_ip_info()
   let _v = eth.version()
 }

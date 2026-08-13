@@ -11,6 +11,20 @@ extern "C" {
 #endif
 
 /**
+ * Optional static IPv4 (lwIP byte order). Call before `klin_eth_w5500_start`
+ * (or after start to re-apply). Disables DHCP client on the ETH netif.
+ * Pass 0,0,0 to clear and return to DHCP on next start (before start only).
+ */
+int klin_eth_set_static_ip(uint32_t ip, uint32_t gw, uint32_t netmask);
+
+/**
+ * Optional hostname for the ETH netif (DHCP / mDNS identity).
+ * Call before start (stored) or after start (applied immediately).
+ * Empty / NULL clears the pending hostname.
+ */
+int klin_eth_set_hostname(const char *name);
+
+/**
  * NVS (optional reuse) + netif + default event loop + SPI bus + W5500 MAC/PHY
  * + driver install + start. Pins are explicit (prime rule).
  *
@@ -33,10 +47,15 @@ int klin_eth_link_up(void);
 /** Block until ETH GOT_IP or timeout_ms (-1 = forever). 0 = OK. */
 int klin_eth_wait_ip(int timeout_ms);
 
-/** IPv4 as u32 (lwIP order) after wait success; else 0. */
+/** IPv4 / gateway / netmask as u32 (lwIP order) after wait success; else 0. */
 uint32_t klin_eth_ip_u32(void);
+uint32_t klin_eth_gateway_u32(void);
+uint32_t klin_eth_netmask_u32(void);
 
 void klin_eth_log_ip(void);
+
+/** Print ip / gateway / netmask. */
+void klin_eth_log_ip_info(void);
 
 /** Print MAC via `esp_eth_ioctl(ETH_CMD_G_MAC_ADDR)`. */
 void klin_eth_log_mac(void);

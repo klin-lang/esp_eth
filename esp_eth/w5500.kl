@@ -5,6 +5,12 @@ module esp_eth
 
 @[link("w5500_idf.c")]
 @[cinclude("w5500_idf.h")]
+@[cimport, codename("klin_eth_set_static_ip")]
+fn klin_eth_set_static_ip(ip: u32, gw: u32, netmask: u32): i32
+
+@[cimport, codename("klin_eth_set_hostname")]
+fn klin_eth_set_hostname(name: str): i32
+
 @[cimport, codename("klin_eth_w5500_start")]
 fn klin_eth_w5500_start(
     spi_host: i32,
@@ -30,8 +36,17 @@ fn klin_eth_wait_ip(timeout_ms: i32): i32
 @[cimport, codename("klin_eth_ip_u32")]
 fn klin_eth_ip_u32(): u32
 
+@[cimport, codename("klin_eth_gateway_u32")]
+fn klin_eth_gateway_u32(): u32
+
+@[cimport, codename("klin_eth_netmask_u32")]
+fn klin_eth_netmask_u32(): u32
+
 @[cimport, codename("klin_eth_log_ip")]
 fn klin_eth_log_ip()
+
+@[cimport, codename("klin_eth_log_ip_info")]
+fn klin_eth_log_ip_info()
 
 @[cimport, codename("klin_eth_log_mac")]
 fn klin_eth_log_mac()
@@ -47,6 +62,22 @@ pub fn err_ok(): i32 {
 /// Typical `SPI2_HOST` on ESP32 / S3 (value `1`).
 pub fn spi2_host(): i32 {
     return 1
+}
+
+/// Pack `a.b.c.d` into lwIP `u32` order (ESP little-endian host).
+pub fn ipv4(a: u32, b: u32, c: u32, d: u32): u32 {
+    return a | (b << 8) | (c << 16) | (d << 24)
+}
+
+/// Optional static IPv4. Prefer before `w5500_start` (disables DHCP).
+/// Pass `0, 0, 0` to clear pending static config (DHCP on next start).
+pub fn set_static_ip(ip: u32, gw: u32, netmask: u32): i32 {
+    return klin_eth_set_static_ip(ip, gw, netmask)
+}
+
+/// Optional netif hostname (DHCP client id / mDNS). Before or after start.
+pub fn set_hostname(name: str): i32 {
+    return klin_eth_set_hostname(name)
 }
 
 /// Install W5500 + netif + start driver. Pins explicit. Returns `esp_err_t` as `i32`.
@@ -86,8 +117,21 @@ pub fn ip_u32(): u32 {
     return klin_eth_ip_u32()
 }
 
+pub fn gateway_u32(): u32 {
+    return klin_eth_gateway_u32()
+}
+
+pub fn netmask_u32(): u32 {
+    return klin_eth_netmask_u32()
+}
+
 pub fn log_ip() {
     klin_eth_log_ip()
+}
+
+/// Debug print of ip / gateway / netmask after `wait_ip`.
+pub fn log_ip_info() {
+    klin_eth_log_ip_info()
 }
 
 /// Debug print of interface MAC (`ETH_CMD_G_MAC_ADDR`).

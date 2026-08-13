@@ -8,7 +8,7 @@ One package for ETH backends (like IDF `esp_eth`). **Not** part of
 
 Decision: Klin [issue 102](https://github.com/klin-lang/klin/blob/main/issues/102-esp-eth-idf.md).
 
-## Status (`@v0.1.1`)
+## Status (`@v0.1.2`)
 
 | Backend | Status | Notes |
 |---|---|---|
@@ -19,11 +19,13 @@ Decision: Klin [issue 102](https://github.com/klin-lang/klin/blob/main/issues/10
 | API | Notes |
 |---|---|
 | `w5500_start(spi_host, mosi, miso, sclk, cs, int, rst, mhz, poll_ms)` | Pins explicit |
+| `set_static_ip` / `ipv4` / `set_hostname` | Optional; prefer before start (DHCP off) |
 | `wait_link` / `link_up` | Cable/PHY link (`ETHERNET_EVENT_CONNECTED`) |
 | `log_mac` | `ETH_CMD_G_MAC_ADDR` debug print |
-| `wait_ip` / `ip_u32` / `log_ip` / `stop` | Shared after start |
+| `wait_ip` / `ip_u32` / `gateway_u32` / `netmask_u32` | Shared after GOT_IP |
+| `log_ip` / `log_ip_info` / `stop` | Debug + stop |
 
-`version()` → `2` (`@v0.1.1`).
+`version()` → `3` (`@v0.1.2`).
 
 ## Silicon reminder
 
@@ -51,14 +53,13 @@ examples/w5500_s3/      # ESP32-S3 idf.py (edit pins)
 examples/smoke/         # emit-c check
 ```
 
-## Usage
+## Usage (DHCP)
 
 ```klin
 import "github/klin-lang/esp_eth" eth
 
 @[cexport, codename("klin_app_main")]
 fn app() {
-  // Example pins — change to match your board / W5500 wiring.
   let mut e = eth.w5500_start(
     eth.spi2_host(),
     11, 13, 12, 14,   // MOSI MISO SCLK CS
@@ -79,12 +80,45 @@ fn app() {
   if e != eth.err_ok() {
     return
   }
-  eth.log_ip()
+  eth.log_ip_info()
+}
+```
+
+## Usage (static IP)
+
+```klin
+import "github/klin-lang/esp_eth" eth
+
+@[cexport, codename("klin_app_main")]
+fn app() {
+  let _h = eth.set_hostname("klin-eth")
+  let _s = eth.set_static_ip(
+    eth.ipv4(192, 168, 1, 50),
+    eth.ipv4(192, 168, 1, 1),
+    eth.ipv4(255, 255, 255, 0)
+  )
+  let mut e = eth.w5500_start(
+    eth.spi2_host(),
+    11, 13, 12, 14,
+    10, 9, 20, 10
+  )
+  if e != eth.err_ok() {
+    return
+  }
+  e = eth.wait_link(15000)
+  if e != eth.err_ok() {
+    return
+  }
+  e = eth.wait_ip(5000)
+  if e != eth.err_ok() {
+    return
+  }
+  eth.log_ip_info()
 }
 ```
 
 ```sh
-klin get github/klin-lang/esp_eth@v0.1.1
+klin get github/klin-lang/esp_eth@v0.1.2
 ```
 
 ## Example
@@ -101,7 +135,7 @@ make flash
 ## Contract
 
 - No Klin GC / hidden heap — SPI pins and clock are arguments.
-- IDF netif / event loop / DHCP are IDF contracts (documented here).
+- IDF netif / event loop / DHCP (or static IP) are IDF contracts.
 - RMII and other SPI chips: same package, later tags — do not split repos.
 
 ## Links
