@@ -1,0 +1,19 @@
+// emit-c smoke (no ESP-IDF link required for Klin frontend).
+import "../../esp_eth" eth
+
+fn main() {
+  let mut e = eth.w5500_start(eth.spi2_host(), 11, 13, 12, 14, 10, 9, 20, 10)
+  if e != eth.err_ok() {
+    return
+  }
+  e = eth.wait_ip(1000)
+  if e != eth.err_ok() {
+    return
+  }
+  let ip = eth.ip_u32()
+  if ip == 0 {
+    return
+  }
+  eth.log_ip()
+  let _v = eth.version()
+}

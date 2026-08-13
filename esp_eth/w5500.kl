@@ -1,0 +1,76 @@
+/// ESP-IDF Ethernet — W5500 SPI backend (thin Klin surface over `w5500_idf.c`).
+/// One package for all ETH backends; RMII (ESP32/P4 EMAC) comes later.
+/// Not part of `machine_esp`.
+module esp_eth
+
+@[link("w5500_idf.c")]
+@[cinclude("w5500_idf.h")]
+@[cimport, codename("klin_eth_w5500_start")]
+fn klin_eth_w5500_start(
+    spi_host: i32,
+    mosi: i32,
+    miso: i32,
+    sclk: i32,
+    cs: i32,
+    int_gpio: i32,
+    rst_gpio: i32,
+    clock_mhz: i32,
+    poll_ms: i32
+): i32
+
+@[cimport, codename("klin_eth_wait_ip")]
+fn klin_eth_wait_ip(timeout_ms: i32): i32
+
+@[cimport, codename("klin_eth_ip_u32")]
+fn klin_eth_ip_u32(): u32
+
+@[cimport, codename("klin_eth_log_ip")]
+fn klin_eth_log_ip()
+
+@[cimport, codename("klin_eth_stop")]
+fn klin_eth_stop(): i32
+
+/// `ESP_OK` (0).
+pub fn err_ok(): i32 {
+    return 0
+}
+
+/// Typical `SPI2_HOST` on ESP32 / S3 (value `1`).
+pub fn spi2_host(): i32 {
+    return 1
+}
+
+/// Install W5500 + netif + start driver. Pins explicit. Returns `esp_err_t` as `i32`.
+/// Use `int_gpio = -1` for poll mode (`poll_ms`); `rst_gpio = -1` if unused.
+pub fn w5500_start(
+    spi_host: i32,
+    mosi: i32,
+    miso: i32,
+    sclk: i32,
+    cs: i32,
+    int_gpio: i32,
+    rst_gpio: i32,
+    clock_mhz: i32,
+    poll_ms: i32
+): i32 {
+    return klin_eth_w5500_start(
+        spi_host, mosi, miso, sclk, cs, int_gpio, rst_gpio, clock_mhz, poll_ms
+    )
+}
+
+/// Block until GOT_IP or `timeout_ms` (`-1` = forever).
+pub fn wait_ip(timeout_ms: i32): i32 {
+    return klin_eth_wait_ip(timeout_ms)
+}
+
+pub fn ip_u32(): u32 {
+    return klin_eth_ip_u32()
+}
+
+pub fn log_ip() {
+    klin_eth_log_ip()
+}
+
+pub fn stop(): i32 {
+    return klin_eth_stop()
+}

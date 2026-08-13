@@ -1,0 +1,38 @@
+// ESP32-S3 + W5500 SPI Ethernet via klin-lang/esp_eth.
+// Edit GPIO numbers to match your wiring / board, then:
+//   make emit && make build && make flash
+import "../../esp_eth" eth
+
+@[cexport, codename("klin_app_main")]
+fn app_main_klin() {
+  // Placeholder pins (common DIY SPI ETH wiring) — change before flash.
+  let mut e = eth.w5500_start(
+    eth.spi2_host(),
+    11, // MOSI
+    13, // MISO
+    12, // SCLK
+    14, // CS
+    10, // INT (−1 to poll)
+    9,  // RST (−1 if unused)
+    20, // MHz
+    10  // poll_ms
+  )
+  if e != eth.err_ok() {
+    return
+  }
+  e = eth.wait_ip(30000)
+  if e != eth.err_ok() {
+    return
+  }
+  eth.log_ip()
+  while true {
+    let mut i: i32 = 0
+    while i < 20000000 {
+      i = i + 1
+    }
+  }
+}
+
+fn main() {
+  app_main_klin()
+}
