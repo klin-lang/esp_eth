@@ -18,6 +18,12 @@ fn klin_eth_w5500_start(
     poll_ms: i32
 ): i32
 
+@[cimport, codename("klin_eth_wait_link")]
+fn klin_eth_wait_link(timeout_ms: i32): i32
+
+@[cimport, codename("klin_eth_link_up")]
+fn klin_eth_link_up(): i32
+
 @[cimport, codename("klin_eth_wait_ip")]
 fn klin_eth_wait_ip(timeout_ms: i32): i32
 
@@ -26,6 +32,9 @@ fn klin_eth_ip_u32(): u32
 
 @[cimport, codename("klin_eth_log_ip")]
 fn klin_eth_log_ip()
+
+@[cimport, codename("klin_eth_log_mac")]
+fn klin_eth_log_mac()
 
 @[cimport, codename("klin_eth_stop")]
 fn klin_eth_stop(): i32
@@ -58,6 +67,16 @@ pub fn w5500_start(
     )
 }
 
+/// Block until PHY link up (`ETHERNET_EVENT_CONNECTED`) or timeout.
+pub fn wait_link(timeout_ms: i32): i32 {
+    return klin_eth_wait_link(timeout_ms)
+}
+
+/// True after link-up event (cleared on disconnect).
+pub fn link_up(): bool {
+    return klin_eth_link_up() != 0
+}
+
 /// Block until GOT_IP or `timeout_ms` (`-1` = forever).
 pub fn wait_ip(timeout_ms: i32): i32 {
     return klin_eth_wait_ip(timeout_ms)
@@ -69,6 +88,11 @@ pub fn ip_u32(): u32 {
 
 pub fn log_ip() {
     klin_eth_log_ip()
+}
+
+/// Debug print of interface MAC (`ETH_CMD_G_MAC_ADDR`).
+pub fn log_mac() {
+    klin_eth_log_mac()
 }
 
 pub fn stop(): i32 {
