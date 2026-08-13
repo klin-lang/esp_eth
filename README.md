@@ -8,7 +8,7 @@ One package for ETH backends (like IDF `esp_eth`). **Not** part of
 
 Decision: Klin [issue 102](https://github.com/klin-lang/klin/blob/main/issues/102-esp-eth-idf.md).
 
-## Status (`@v0.1.0`)
+## Status (`@v0.1.1`)
 
 | Backend | Status | Notes |
 |---|---|---|
@@ -19,9 +19,11 @@ Decision: Klin [issue 102](https://github.com/klin-lang/klin/blob/main/issues/10
 | API | Notes |
 |---|---|
 | `w5500_start(spi_host, mosi, miso, sclk, cs, int, rst, mhz, poll_ms)` | Pins explicit |
+| `wait_link` / `link_up` | Cable/PHY link (`ETHERNET_EVENT_CONNECTED`) |
+| `log_mac` | `ETH_CMD_G_MAC_ADDR` debug print |
 | `wait_ip` / `ip_u32` / `log_ip` / `stop` | Shared after start |
 
-`version()` → `1`.
+`version()` → `2` (`@v0.1.1`).
 
 ## Silicon reminder
 
@@ -68,6 +70,11 @@ fn app() {
   if e != eth.err_ok() {
     return
   }
+  eth.log_mac()
+  e = eth.wait_link(15000)
+  if e != eth.err_ok() {
+    return
+  }
   e = eth.wait_ip(30000)
   if e != eth.err_ok() {
     return
@@ -77,7 +84,7 @@ fn app() {
 ```
 
 ```sh
-klin get github/klin-lang/esp_eth@v0.1.0
+klin get github/klin-lang/esp_eth@v0.1.1
 ```
 
 ## Example
