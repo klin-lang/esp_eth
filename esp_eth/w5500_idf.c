@@ -16,6 +16,7 @@
 #include "nvs_flash.h"
 
 #define KLIN_ETH_GOT_IP_BIT BIT0
+#define KLIN_ETH_LINK_BIT   BIT1
 
 static EventGroupHandle_t s_eth_event_group;
 static esp_eth_handle_t s_eth_handle;
@@ -23,6 +24,7 @@ static esp_netif_t *s_eth_netif;
 static esp_eth_netif_glue_handle_t s_eth_glue;
 static uint32_t s_ip_u32;
 static int s_started;
+static int s_link_up;
 static spi_device_interface_config_t s_spi_devcfg;
 
 static void klin_eth_event_handler(void *arg, esp_event_base_t event_base,
@@ -30,7 +32,15 @@ static void klin_eth_event_handler(void *arg, esp_event_base_t event_base,
 {
     (void)arg;
     (void)event_data;
-    if (event_base == IP_EVENT && event_id == IP_EVENT_ETH_GOT_IP) {
+    if (event_base == ETH_EVENT) {
+        if (event_id == ETHERNET_EVENT_CONNECTED) {
+            s_link_up = 1;
+            xEventGroupSetBits(s_eth_event_group, KLIN_ETH_LINK_BIT);
+        } else if (event_id == ETHERNET_EVENT_DISCONNECTED) {
+            s_link_up = 0;
+            xEventGroupClearBits(s_eth_event_group, KLIN_ETH_LINK_BIT);
+        }
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_ETH_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         s_ip_u32 = (uint32_t)event->ip_info.ip.addr;
         xEventGroupSetBits(s_eth_event_group, KLIN_ETH_GOT_IP_BIT);
@@ -144,6 +154,11 @@ int klin_eth_w5500_start(int spi_host, int mosi, int miso, int sclk, int cs,
         return (int)err;
     }
 
+    err = esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
+                                     &klin_eth_event_handler, NULL);
+    if (err != ESP_OK) {
+        return (int)err;
+    }
     err = esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP,
                                      &klin_eth_event_handler, NULL);
     if (err != ESP_OK) {
@@ -151,7 +166,9 @@ int klin_eth_w5500_start(int spi_host, int mosi, int miso, int sclk, int cs,
     }
 
     s_ip_u32 = 0;
-    xEventGroupClearBits(s_eth_event_group, KLIN_ETH_GOT_IP_BIT);
+    s_link_up = 0;
+    xEventGroupClearBits(s_eth_event_group,
+                         KLIN_ETH_GOT_IP_BIT | KLIN_ETH_LINK_BIT);
 
     err = esp_eth_start(s_eth_handle);
     if (err != ESP_OK) {
@@ -160,6 +177,34 @@ int klin_eth_w5500_start(int spi_host, int mosi, int miso, int sclk, int cs,
 
     s_started = 1;
     return (int)ESP_OK;
+}
+
+int klin_eth_wait_link(int timeout_ms)
+{
+    TickType_t ticks;
+    EventBits_t bits;
+
+    if (!s_started || s_eth_event_group == NULL) {
+        return (int)ESP_ERR_INVALID_STATE;
+    }
+
+    if (timeout_ms < 0) {
+        ticks = portMAX_DELAY;
+    } else {
+        ticks = pdMS_TO_TICKS((uint32_t)timeout_ms);
+    }
+
+    bits = xEventGroupWaitBits(s_eth_event_group, KLIN_ETH_LINK_BIT, pdFALSE,
+                               pdFALSE, ticks);
+    if (bits & KLIN_ETH_LINK_BIT) {
+        return (int)ESP_OK;
+    }
+    return (int)ESP_ERR_TIMEOUT;
+}
+
+int klin_eth_link_up(void)
+{
+    return s_link_up ? 1 : 0;
 }
 
 int klin_eth_wait_ip(int timeout_ms)
@@ -196,6 +241,22 @@ void klin_eth_log_ip(void)
     printf("klin_eth: ip %u.%u.%u.%u\n", (unsigned)(a & 0xffu),
            (unsigned)((a >> 8) & 0xffu), (unsigned)((a >> 16) & 0xffu),
            (unsigned)((a >> 24) & 0xffu));
+}
+
+void klin_eth_log_mac(void)
+{
+    uint8_t mac[6];
+
+    if (!s_started || s_eth_handle == NULL) {
+        printf("klin_eth: mac (not started)\n");
+        return;
+    }
+    if (esp_eth_ioctl(s_eth_handle, ETH_CMD_G_MAC_ADDR, mac) != ESP_OK) {
+        printf("klin_eth: mac ioctl failed\n");
+        return;
+    }
+    printf("klin_eth: mac %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1],
+           mac[2], mac[3], mac[4], mac[5]);
 }
 
 int klin_eth_stop(void)
