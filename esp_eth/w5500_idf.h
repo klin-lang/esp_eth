@@ -1,5 +1,6 @@
-/* Thin W5500 SPI Ethernet helpers for Klin — ESP-IDF v5.x esp_eth.
- * RMII (internal EMAC) is a later backend in this same package.
+/* Thin Ethernet helpers for Klin — ESP-IDF v5.x esp_eth.
+ * Backends: W5500 SPI (`klin_eth_w5500_start`) and RMII EMAC
+ * (`klin_eth_rmii_start`, needs CONFIG_ETH_USE_ESP32_EMAC).
  * Heap / netif / event loop are IDF contracts, not Klin magic.
  */
 #pragma once
@@ -37,6 +38,24 @@ int klin_eth_set_hostname(const char *name);
  */
 int klin_eth_w5500_start(int spi_host, int mosi, int miso, int sclk, int cs,
                          int int_gpio, int rst_gpio, int clock_mhz, int poll_ms);
+
+/**
+ * Internal EMAC + external PHY (RMII). Pins explicit.
+ * Returns ESP_ERR_NOT_SUPPORTED when CONFIG_ETH_USE_ESP32_EMAC is off (S3/C3).
+ *
+ * @param mdc/mdio     SMI GPIOs
+ * @param rst          PHY reset GPIO, or -1 if unused
+ * @param phy_addr     MDIO address (board-specific; often 0 or 1)
+ * @param phy_kind     0 = LAN87xx, 1 = IP101
+ * @param clock_mode   0 = EMAC_CLK_EXT_IN, 1 = EMAC_CLK_OUT
+ * @param clock_gpio   REF_CLK GPIO (in or out, matching clock_mode)
+ * @param clock_in_gpio P4 loopback input when clock_mode=OUT; else -1
+ * @param tx_en/txd0/txd1/crs_dv/rxd0/rxd1  RMII data plane (P4 IO_MUX set)
+ */
+int klin_eth_rmii_start(int mdc, int mdio, int rst, int phy_addr, int phy_kind,
+                        int clock_mode, int clock_gpio, int clock_in_gpio,
+                        int tx_en, int txd0, int txd1, int crs_dv, int rxd0,
+                        int rxd1);
 
 /** Block until cable link up or timeout_ms (-1 = forever). 0 = OK. */
 int klin_eth_wait_link(int timeout_ms);

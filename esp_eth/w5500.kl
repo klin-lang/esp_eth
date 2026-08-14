@@ -1,5 +1,5 @@
 /// ESP-IDF Ethernet — W5500 SPI backend (thin Klin surface over `w5500_idf.c`).
-/// One package for all ETH backends; RMII (ESP32/P4 EMAC) comes later.
+/// One package for all ETH backends; RMII is `rmii_start` in `rmii.kl`.
 /// Not part of `machine_esp`.
 module esp_eth
 

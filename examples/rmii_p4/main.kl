@@ -1,0 +1,50 @@
+// ESP32-P4 + RMII internal EMAC via klin-lang/esp_eth.
+// Defaults match ESP32-P4-Function-EV-Board (IP101, IDF EMAC pads).
+// Edit GPIO / PHY before flash if your board differs, then:
+//   make emit && make build && make flash
+import "../../esp_eth" eth
+
+@[cexport, codename("klin_app_main")]
+fn app_main_klin() {
+  // IDF P4 defaults: MDC=31 MDIO=52 RST=51 CLK_IN=50
+  // TX_EN=49 TXD0=34 TXD1=35 CRS_DV=28 RXD0=29 RXD1=30
+  let mut e = eth.rmii_start(
+    31,                 // MDC
+    52,                 // MDIO
+    51,                 // PHY RST (−1 if unused)
+    1,                  // PHY addr
+    eth.phy_ip101(),    // LAN87xx: eth.phy_lan87xx()
+    eth.clk_ext_in(),   // external 50 MHz REF_CLK
+    50,                 // clock GPIO
+    -1,                 // clock_in loopback (only with clk_out)
+    49,                 // TX_EN
+    34,                 // TXD0
+    35,                 // TXD1
+    28,                 // CRS_DV
+    29,                 // RXD0
+    30                  // RXD1
+  )
+  if e != eth.err_ok() {
+    return
+  }
+  eth.log_mac()
+  e = eth.wait_link(15000)
+  if e != eth.err_ok() {
+    return
+  }
+  e = eth.wait_ip(30000)
+  if e != eth.err_ok() {
+    return
+  }
+  eth.log_ip_info()
+  while true {
+    let mut i: i32 = 0
+    while i < 20000000 {
+      i = i + 1
+    }
+  }
+}
+
+fn main() {
+  app_main_klin()
+}

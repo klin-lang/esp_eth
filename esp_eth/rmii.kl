@@ -1,0 +1,70 @@
+/// ESP-IDF Ethernet — RMII internal EMAC (ESP32 / ESP32-P4 + external PHY).
+/// Pins / PHY / clock are arguments (prime rule). Shared wait_link / wait_ip
+/// / stop live in `w5500.kl`. Needs `CONFIG_ETH_USE_ESP32_EMAC` (not S3/C3).
+module esp_eth
+
+@[cimport, codename("klin_eth_rmii_start")]
+fn klin_eth_rmii_start(
+    mdc: i32,
+    mdio: i32,
+    rst: i32,
+    phy_addr: i32,
+    phy_kind: i32,
+    clock_mode: i32,
+    clock_gpio: i32,
+    clock_in_gpio: i32,
+    tx_en: i32,
+    txd0: i32,
+    txd1: i32,
+    crs_dv: i32,
+    rxd0: i32,
+    rxd1: i32
+): i32
+
+/// LAN87xx family (`esp_eth_phy_new_lan87xx`). `phy_kind` for `rmii_start`.
+pub fn phy_lan87xx(): i32 {
+    return 0
+}
+
+/// IP101 (`esp_eth_phy_new_ip101`). On-board PHY on ESP32-P4-Function-EV-Board.
+pub fn phy_ip101(): i32 {
+    return 1
+}
+
+/// External 50 MHz REF_CLK into EMAC (`EMAC_CLK_EXT_IN`).
+pub fn clk_ext_in(): i32 {
+    return 0
+}
+
+/// EMAC generates REF_CLK (`EMAC_CLK_OUT`). On P4 pass loopback GPIO as
+/// `clock_in_gpio`; use `-1` when the SoC loops internally (classic ESP32).
+pub fn clk_out(): i32 {
+    return 1
+}
+
+/// Install internal EMAC + PHY + netif + start. Returns `esp_err_t` as `i32`.
+/// `rst = -1` if PHY reset is unused. `clock_in_gpio = -1` unless `clk_out()`.
+/// Data-plane GPIOs apply on P4 (`SOC_EMAC_USE_MULTI_IO_MUX`); classic ESP32
+/// has fixed RMII pads (args accepted, ignored by IDF).
+pub fn rmii_start(
+    mdc: i32,
+    mdio: i32,
+    rst: i32,
+    phy_addr: i32,
+    phy_kind: i32,
+    clock_mode: i32,
+    clock_gpio: i32,
+    clock_in_gpio: i32,
+    tx_en: i32,
+    txd0: i32,
+    txd1: i32,
+    crs_dv: i32,
+    rxd0: i32,
+    rxd1: i32
+): i32 {
+    return klin_eth_rmii_start(
+        mdc, mdio, rst, phy_addr, phy_kind,
+        clock_mode, clock_gpio, clock_in_gpio,
+        tx_en, txd0, txd1, crs_dv, rxd0, rxd1
+    )
+}
