@@ -1,10 +1,14 @@
-/* W5500 SPI Ethernet bring-up for Klin under ESP-IDF v5.x.
- * Requires sdkconfig: CONFIG_ETH_USE_SPI_ETHERNET + CONFIG_ETH_SPI_ETHERNET_W5500.
+/* Ethernet bring-up for Klin under ESP-IDF v5.x.
+ * W5500: CONFIG_ETH_USE_SPI_ETHERNET + CONFIG_ETH_SPI_ETHERNET_W5500.
+ * RMII:  CONFIG_ETH_USE_ESP32_EMAC (ESP32 / ESP32-P4).
  */
 #include "w5500_idf.h"
 
 #include <stdio.h>
 #include <string.h>
+
+#include "sdkconfig.h"
+#include "soc/soc_caps.h"
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -14,6 +18,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "nvs_flash.h"
+
+#if CONFIG_ETH_USE_ESP32_EMAC
+#include "esp_eth_mac.h"
+#include "esp_eth_mac_esp.h"
+#include "esp_eth_phy.h"
+#endif
 
 #define KLIN_ETH_GOT_IP_BIT BIT0
 #define KLIN_ETH_LINK_BIT   BIT1
@@ -77,6 +87,41 @@ static esp_err_t klin_eth_apply_hostname(void)
     return esp_netif_set_hostname(s_eth_netif, s_hostname);
 }
 
+static esp_err_t klin_eth_common_init(void)
+{
+    esp_err_t err;
+
+    err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        err = nvs_flash_erase();
+        if (err != ESP_OK) {
+            return err;
+        }
+        err = nvs_flash_init();
+    }
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = esp_netif_init();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = esp_event_loop_create_default();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        return err;
+    }
+
+    if (s_eth_event_group == NULL) {
+        s_eth_event_group = xEventGroupCreate();
+        if (s_eth_event_group == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    return ESP_OK;
+}
+
 static void klin_eth_event_handler(void *arg, esp_event_base_t event_base,
                                    int32_t event_id, void *event_data)
 {
@@ -135,6 +180,66 @@ int klin_eth_set_hostname(const char *name)
     return (int)ESP_OK;
 }
 
+static esp_err_t klin_eth_attach_and_start(esp_eth_mac_t *mac, esp_eth_phy_t *phy)
+{
+    esp_err_t err;
+    esp_eth_config_t eth_config;
+    esp_netif_config_t netif_cfg;
+
+    eth_config = (esp_eth_config_t)ETH_DEFAULT_CONFIG(mac, phy);
+    err = esp_eth_driver_install(&eth_config, &s_eth_handle);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    netif_cfg = (esp_netif_config_t)ESP_NETIF_DEFAULT_ETH();
+    s_eth_netif = esp_netif_new(&netif_cfg);
+    if (s_eth_netif == NULL) {
+        return ESP_FAIL;
+    }
+    s_eth_glue = esp_eth_new_netif_glue(s_eth_handle);
+    err = esp_netif_attach(s_eth_netif, s_eth_glue);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = klin_eth_apply_hostname();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = klin_eth_apply_static_ip();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
+                                     &klin_eth_event_handler, NULL);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP,
+                                     &klin_eth_event_handler, NULL);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    s_ip_u32 = 0;
+    s_gw_u32 = 0;
+    s_mask_u32 = 0;
+    s_link_up = 0;
+    xEventGroupClearBits(s_eth_event_group,
+                         KLIN_ETH_GOT_IP_BIT | KLIN_ETH_LINK_BIT);
+
+    err = esp_eth_start(s_eth_handle);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    s_started = 1;
+    return ESP_OK;
+}
+
 int klin_eth_w5500_start(int spi_host, int mosi, int miso, int sclk, int cs,
                          int int_gpio, int rst_gpio, int clock_mhz, int poll_ms)
 {
@@ -144,8 +249,6 @@ int klin_eth_w5500_start(int spi_host, int mosi, int miso, int sclk, int cs,
     eth_w5500_config_t w5500_config;
     esp_eth_mac_t *mac;
     esp_eth_phy_t *phy;
-    esp_eth_config_t eth_config;
-    esp_netif_config_t netif_cfg;
     spi_bus_config_t buscfg;
 
     if (s_started) {
@@ -158,31 +261,9 @@ int klin_eth_w5500_start(int spi_host, int mosi, int miso, int sclk, int cs,
         poll_ms = 10;
     }
 
-    err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        err = nvs_flash_erase();
-        if (err != ESP_OK) {
-            return (int)err;
-        }
-        err = nvs_flash_init();
-    }
+    err = klin_eth_common_init();
     if (err != ESP_OK) {
         return (int)err;
-    }
-
-    err = esp_netif_init();
-    if (err != ESP_OK) {
-        return (int)err;
-    }
-
-    err = esp_event_loop_create_default();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        return (int)err;
-    }
-
-    s_eth_event_group = xEventGroupCreate();
-    if (s_eth_event_group == NULL) {
-        return (int)ESP_ERR_NO_MEM;
     }
 
     if (int_gpio >= 0) {
@@ -225,58 +306,104 @@ int klin_eth_w5500_start(int spi_host, int mosi, int miso, int sclk, int cs,
         return (int)ESP_FAIL;
     }
 
-    eth_config = (esp_eth_config_t)ETH_DEFAULT_CONFIG(mac, phy);
-    err = esp_eth_driver_install(&eth_config, &s_eth_handle);
+    return (int)klin_eth_attach_and_start(mac, phy);
+}
+
+int klin_eth_rmii_start(int mdc, int mdio, int rst, int phy_addr, int phy_kind,
+                        int clock_mode, int clock_gpio, int clock_in_gpio,
+                        int tx_en, int txd0, int txd1, int crs_dv, int rxd0,
+                        int rxd1)
+{
+#if !CONFIG_ETH_USE_ESP32_EMAC
+    (void)mdc;
+    (void)mdio;
+    (void)rst;
+    (void)phy_addr;
+    (void)phy_kind;
+    (void)clock_mode;
+    (void)clock_gpio;
+    (void)clock_in_gpio;
+    (void)tx_en;
+    (void)txd0;
+    (void)txd1;
+    (void)crs_dv;
+    (void)rxd0;
+    (void)rxd1;
+    return (int)ESP_ERR_NOT_SUPPORTED;
+#else
+    esp_err_t err;
+    eth_mac_config_t mac_config;
+    eth_phy_config_t phy_config;
+    eth_esp32_emac_config_t emac_config;
+    esp_eth_mac_t *mac;
+    esp_eth_phy_t *phy;
+
+    if (s_started) {
+        return (int)ESP_OK;
+    }
+    if (phy_kind != 0 && phy_kind != 1) {
+        return (int)ESP_ERR_INVALID_ARG;
+    }
+    if (clock_mode != 0 && clock_mode != 1) {
+        return (int)ESP_ERR_INVALID_ARG;
+    }
+
+    err = klin_eth_common_init();
     if (err != ESP_OK) {
         return (int)err;
     }
 
-    netif_cfg = (esp_netif_config_t)ESP_NETIF_DEFAULT_ETH();
-    s_eth_netif = esp_netif_new(&netif_cfg);
-    if (s_eth_netif == NULL) {
+    mac_config = (eth_mac_config_t)ETH_MAC_DEFAULT_CONFIG();
+    phy_config = (eth_phy_config_t)ETH_PHY_DEFAULT_CONFIG();
+    phy_config.phy_addr = phy_addr;
+    phy_config.reset_gpio_num = rst;
+
+    emac_config = (eth_esp32_emac_config_t)ETH_ESP32_EMAC_DEFAULT_CONFIG();
+    emac_config.interface = EMAC_DATA_INTERFACE_RMII;
+    emac_config.smi_gpio.mdc_num = mdc;
+    emac_config.smi_gpio.mdio_num = mdio;
+    emac_config.clock_config.rmii.clock_mode =
+        (clock_mode == 1) ? EMAC_CLK_OUT : EMAC_CLK_EXT_IN;
+    emac_config.clock_config.rmii.clock_gpio = (emac_rmii_clock_gpio_t)clock_gpio;
+
+#if SOC_EMAC_USE_MULTI_IO_MUX || SOC_EMAC_MII_USE_GPIO_MATRIX
+    emac_config.emac_dataif_gpio.rmii.tx_en_num = tx_en;
+    emac_config.emac_dataif_gpio.rmii.txd0_num = txd0;
+    emac_config.emac_dataif_gpio.rmii.txd1_num = txd1;
+    emac_config.emac_dataif_gpio.rmii.crs_dv_num = crs_dv;
+    emac_config.emac_dataif_gpio.rmii.rxd0_num = rxd0;
+    emac_config.emac_dataif_gpio.rmii.rxd1_num = rxd1;
+#else
+    (void)tx_en;
+    (void)txd0;
+    (void)txd1;
+    (void)crs_dv;
+    (void)rxd0;
+    (void)rxd1;
+#endif
+
+#if !SOC_EMAC_RMII_CLK_OUT_INTERNAL_LOOPBACK
+    if (clock_mode == 1) {
+        emac_config.clock_config_out_in.rmii.clock_mode = EMAC_CLK_EXT_IN;
+        emac_config.clock_config_out_in.rmii.clock_gpio =
+            (emac_rmii_clock_gpio_t)clock_in_gpio;
+    }
+#else
+    (void)clock_in_gpio;
+#endif
+
+    mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
+    if (phy_kind == 1) {
+        phy = esp_eth_phy_new_ip101(&phy_config);
+    } else {
+        phy = esp_eth_phy_new_lan87xx(&phy_config);
+    }
+    if (mac == NULL || phy == NULL) {
         return (int)ESP_FAIL;
     }
-    s_eth_glue = esp_eth_new_netif_glue(s_eth_handle);
-    err = esp_netif_attach(s_eth_netif, s_eth_glue);
-    if (err != ESP_OK) {
-        return (int)err;
-    }
 
-    err = klin_eth_apply_hostname();
-    if (err != ESP_OK) {
-        return (int)err;
-    }
-
-    err = klin_eth_apply_static_ip();
-    if (err != ESP_OK) {
-        return (int)err;
-    }
-
-    err = esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
-                                     &klin_eth_event_handler, NULL);
-    if (err != ESP_OK) {
-        return (int)err;
-    }
-    err = esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP,
-                                     &klin_eth_event_handler, NULL);
-    if (err != ESP_OK) {
-        return (int)err;
-    }
-
-    s_ip_u32 = 0;
-    s_gw_u32 = 0;
-    s_mask_u32 = 0;
-    s_link_up = 0;
-    xEventGroupClearBits(s_eth_event_group,
-                         KLIN_ETH_GOT_IP_BIT | KLIN_ETH_LINK_BIT);
-
-    err = esp_eth_start(s_eth_handle);
-    if (err != ESP_OK) {
-        return (int)err;
-    }
-
-    s_started = 1;
-    return (int)ESP_OK;
+    return (int)klin_eth_attach_and_start(mac, phy);
+#endif
 }
 
 int klin_eth_wait_link(int timeout_ms)

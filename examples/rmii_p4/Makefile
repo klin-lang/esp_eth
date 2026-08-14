@@ -1,0 +1,32 @@
+# ESP32-P4 + RMII EMAC: Klin --emit-c → ESP-IDF.
+KLIN ?= klin
+IDF_PY ?= idf.py
+
+.PHONY: all emit build flash monitor clean
+
+all: build
+
+emit: out/main.c
+
+out/main.c out/main.link: main.kl $(wildcard ../../esp_eth/*)
+	@mkdir -p out
+	@case "$(KLIN)" in \
+	  *.dart) dart run "$(KLIN)" --emit-c main.kl ;; \
+	  *) "$(KLIN)" --emit-c main.kl ;; \
+	esac
+	@sed -i 's/^int main(void)/static int klin_unused_main(void)/' out/main.c
+
+build: emit
+	@test -n "$$IDF_PATH" || (echo "IDF_PATH not set — source ESP-IDF export.sh" >&2; exit 1)
+	$(IDF_PY) set-target esp32p4
+	$(IDF_PY) build
+
+flash: build
+	$(IDF_PY) flash
+
+monitor:
+	$(IDF_PY) monitor
+
+clean:
+	rm -rf out build
+	-$(IDF_PY) fullclean 2>/dev/null || true
